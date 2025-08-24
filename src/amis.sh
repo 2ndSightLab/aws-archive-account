@@ -13,14 +13,17 @@ KMS key.
 
 END_TEXT
 
-aws ec2 describe-images \
+read -p "Do you want to see a list of images in the from account? (y): " view
+if [ "$view" == "y" ]; then
+
+  aws ec2 describe-images \
   --owners self \
   --profile $archive_from \
   --region $region \
   --query 'Images[*].{Name: Name, ImageId: ImageId, Snapshots: BlockDeviceMappings[?Ebs.Encrypted==`true`].Ebs.SnapshotId}' \
   --output json \
-| jq -r '.[] | "\(.Name),\(.ImageId),\(.Snapshots[] // "N/A")" ' \
-| while IFS=, read -r ami_name ami_id snapshot_id; do
+ | jq -r '.[] | "\(.Name),\(.ImageId),\(.Snapshots[] // "N/A")" ' \
+ | while IFS=, read -r ami_name ami_id snapshot_id; do
     if [[ "${snapshot_id}" == "N/A" ]]; then
         echo "AMI Name: ${ami_name}, AMI ID: ${ami_id}, KMS Key ID: No encryption/KMS key used"
     else
@@ -35,15 +38,245 @@ aws ec2 describe-images \
         fi
         echo "AMI Name: ${ami_name}, AMI ID: ${ami_id}, KMS Key ID: ${kms_key_id}"
     fi
-done
+  done
 
-echo ""
+  echo ""
+fi
 
-p_name="all"
+echo "Done displaying image names. Copy specified AMI ids:"
 
-while [[ -n $p_name ]]; do
-   read -p "Enter the AMI name you want to archive or all. Enter to continue." p_name
-   if [[ -n $p_name ]]; then
-     echo "TODO: Archive AMIs."
+#mixed case because got some commands from gemini and it uses upper case
+#no time to fix it all
+
+
+create_local_ami() {
+  local ami_id="$1"
+  local key_pair_name="$2"
+  local security_group_id="$3"
+  local subnet_id="$4"
+  local kms_key="$5"
+  local archive_to="$6" 
+  local region="$7"
+  local instance_size="$8"
+
+   block_device_mappings='[{"DeviceName": "/dev/xvda","Ebs": {"Encrypted": true, "KmsKeyId": "'$KMS_KEY'"}}]'
+   echo "block_device_mappings: $block_device_mappings"
+
+   echo "Share ami: $AMI_ID"
+   echo "key pair: $key_pair_name"
+   echo "security group: $security_group_id"
+   echo "subnet: $subnet_id"
+   echo "ksm_key: $kms_key"
+   echo "region: $region"
+
+   if [[ -z "$instance_size" ]]; then 
+
+     read -p "Do you want to see valid instances types for this ami? (y): " show
+     if [ "$show" == "y" ]; then 
+       aws ec2 describe-instance-types \
+       --filters "Name=processor-info.supported-architecture,\
+       Values=$(aws ec2 describe-images --image-ids "$ami_id" \
+       --query 'Images[0].Architecture' --output text \
+       --profile "$archive_to")" --query 'InstanceTypes[*].InstanceType' \
+       --output json --region $region --profile "$archive_to" | jq -r '.[]'
+
+       echo ""
+     fi
+  
+     read -p "Enter desired image size (e.g., t2.micro, t2.medium): " instance_size
+
    fi
-done
+
+   echo "Launch instance from AMI: $ami_id"
+
+   instance_id=$(launch_instance "$ami_id" "$key_pair_name" "$security_group_id" "$subnet_id" "$kms_key" "$archive_to" "$region" "$instance_size")
+
+   if [[ "$instance_id" != i-* ]]; then
+     echo "Error launching instance: $instance_id"
+     exit 1
+   else
+     echo "Launched instance: $instance_id"
+   fi
+
+   instance_id=$(check_status "$instance_id" "$archive_to" "$region")
+
+   if [[ "$instance_id" != i-* ]]; then
+     echo "Error launching instance: $instance_id"
+     exit 1
+   else
+     echo "Launched instance: $instance_id"
+     echo "Stop the instance"
+     aws ec2 stop-instances --instance-ids $instance_id --profile $archive_to --region $region
+     read -p "Enter new image name: " iname
+     read -p "Enter description: " idesc
+
+     aws ec2 wait instance-stopped --instance-ids $instance_id --profile $archive_to --region $region
+
+     NEW_AMI=$(aws ec2 create-image \
+     --instance-id $instance_id \
+     --name "$iname" \
+     --description "$idesc" \
+     --query 'ImageId' \
+     --profile "$archive_to" \
+     --region "$region" \
+     --output text)
+
+     echo "Image created: $NEW_AMI"
+
+     read -p "Do you want to test the image? (y):" test
+     if [ "$test" == "y" ]; then
+        echo "Wait for the image to become available"
+        aws ec2 wait image-available --image-ids $NEW_AMI \
+           --profile $archive_to --region "$region" 
+    
+        new_ami_instance_id=$(launch_instance "$NEW_AMI" "$key_pair_name" "$security_group_id" "$subnet_id" "$kms_key" "$archive_to" "$region" "$instance_size")
+
+        if [[ "$new_ami_instance_id" != i-* ]]; then
+          echo "Error launching instance: $new_ami_instance_id"
+          exit 1
+        else
+          echo "Launched instance: $new_ami_instance_id"
+        fi
+
+        new_ami_instance_id=$(check_status "$new_ami_instance_id" "$archive_to" "$region")
+
+        if [[ "$new_ami_instance_id" != i-* ]]; then
+          echo "Error launching instance: $new_ami_instance_id"
+          exit 1
+        else
+          echo "Status OK for  instance: $new_ami_instance_id" 
+        fi
+        echo "Enter stop to stop the new instance"
+        echo "Enter terminate to terminate the new instance"
+        echo "Enter to leave the instance running"
+        read -p "Enter status: " status
+
+        if [ "$status" == "stop" ]; then
+          aws ec2 stop-instances --instance-ids $new_ami_instance_id \
+            --profile $archive_from --region $region
+        fi
+
+        if [ "$status" == "terminate" ]; then 
+          aws ec2 terminate-instances --instance-ids $new_ami_instance_id \
+          --profile $archive_from --region $region
+        fi
+
+        echo "Terminating the instance using transferred AMI: $ami_id"
+        aws ec2 terminate-instances --instance-ids $instance_id \
+         --profile $archive_from --region $region
+    
+      fi
+   fi
+}
+
+check_status(){
+    local instance_id="$1"
+    local archive_to="$2"
+    local region="$3"
+
+    local COUNT=0
+    local MAX_ATTEMPTS=60
+
+    if [[ "$instance_id" != i-* ]]; then
+      echo "Invalid instance ID: $instance_id"
+      exit
+    fi
+
+    while true; do 
+
+        if [ "$COUNT" -ge "$MAX_ATTEMPTS" ]; then
+           echo "Error: Maximum attempts $MAX_ATTEMPTS reached. Instance not available or terminated."
+           exit 1
+        fi
+
+        ((COUNT++))
+
+        STATE=$(aws ec2 describe-instance-status \
+        --instance-ids "$instance_id" \
+        --include-all-instances \
+        --query '[InstanceStatuses[0].InstanceState.Name, InstanceStatuses[0].InstanceStatus.Status]' \
+        --output text \
+        --region "$region" \
+        --profile "$archive_to")
+
+        read -r STATE STATUS <<< "$STATE"
+
+        if [ "$STATE" == "terminated" ]; then
+            echo "Instance started then terminated."
+            echo "Does the profile $archive_to have permission to use key: $kms_key?"
+            exit 1
+        fi
+ 
+        if [ "$STATE" == "running" ] && [ "$STATUS" == "ok" ]; then
+          echo $instance_id
+          break
+        fi
+                
+        sleep 5
+    done
+}
+
+launch_instance(){
+  local ami_id="$1"
+  local key_pair_name="$2"
+  local security_group_id="$3"
+  local subnet_id="$4"
+  local kms_key="$5"
+  local archive_to="$6"
+  local region="$7"
+  local instance_size="$8"
+
+   instance_id=$(aws ec2 run-instances --image-id "$ami_id" \
+    --instance-type "$instance_size" --key-name "$key_pair_name" \
+    --security-group-ids "$security_group_id" \
+    --subnet-id "$subnet_id" \
+    --block-device-mappings "$block_device_mappings" \
+    --query "Instances[0].InstanceId" \
+    --output text \
+    --region $region \
+    --profile "$archive_to" 2>&1)
+ 
+  echo "$instance_id"
+
+}
+
+share_ami(){
+  local AMI_ID="$1"
+  local to_account="$2"
+  local archive_from="$3"
+  local region="$4"
+
+  echo "Share ami: $AMI_ID"
+  
+  aws ec2 modify-image-attribute --image-id $AMI_ID --launch-permission "Add=[{UserId=$to_account}]" \
+           --profile $archive_from --region $region
+  echo "Shared the AMI."
+}
+
+AMI_ID="all"
+
+while [[ -n "$AMI_ID" ]]; do
+
+   read -p "Enter the AMI ID (not name) you want to archive or all. Enter to continue: " AMI_ID
+
+   echo "Enter the values for the EC2 instances uses to create and test the AMI"
+
+   echo ""
+   read -p "Enter the name of your SSH key pair: " KEY_PAIR
+   read -p "Enter the Security Group ID (e.g., sg-xxxxxxxxxxxxxxxxx): " SG_ID
+   read -p "Enter the Subnet ID (e.g., subnet-xxxxxxxxxxxxxxxxx): " SUBNET_ID
+   read -p "Enter the KMS Key ARN for EBS encryption: " KMS_KEY
+
+   to_account=$(aws sts get-caller-identity --query Account --output text --profile $archive_to)
+
+   if [[ -n $AMI_ID ]]; then
+     if [ "$AMI_ID" == "all" ]; then
+       echo "TODO: Archiving all AMIs not implemented."
+     else
+    
+       share_ami "$AMI_ID" "$to_account" "$archive_from" "$region"
+       create_local_ami "$AMI_ID" "$KEY_PAIR" "$SG_ID" "$SUBNET_ID" "$KMS_KEY" "$archive_to" "$region"
+
+     fi
+   fi
+done      

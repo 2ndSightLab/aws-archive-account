@@ -90,17 +90,23 @@ the role executing the sync command needs KMS permissions in the IAM role policy
 END_TEXT
 fi
 
-for bucket_name in $(aws s3api list-buckets --query "Buckets[].Name" --output text --profile $archive_from --region $region); do 
-  echo "Bucket: ${bucket_name}" 
-  encryption_info=$(aws s3api get-bucket-encryption --bucket "${bucket_name}" --profile $archive_from --region $region)
-  if [[ $? -eq 0 ]]; then 
-     kms_key_id=$(echo "${encryption_info}" | \
-     jq -r '.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.KMSMasterKeyID')
-  if [ "${kms_key_id}" == "null" ]; then kms_key_id=""; fi
-  echo "  KMS Key ID: ${kms_key_id}" 
- fi
-done
-echo ""
+read -p "Do you want to see the list of S3 buckets? (y): " view
+
+if [ "$view" == "y" ]; then
+
+  for bucket_name in $(aws s3api list-buckets --query "Buckets[].Name" --output text --profile $archive_from --region $region); do 
+    echo "Bucket: ${bucket_name}" 
+    encryption_info=$(aws s3api get-bucket-encryption --bucket "${bucket_name}" --profile $archive_from --region $region)
+    if [[ $? -eq 0 ]]; then 
+       kms_key_id=$(echo "${encryption_info}" | \
+       jq -r '.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.KMSMasterKeyID')
+    if [ "${kms_key_id}" == "null" ]; then kms_key_id=""; fi
+    echo "  KMS Key ID: ${kms_key_id}" 
+   fi
+  done
+  echo ""
+
+fi
 
 from_bucket="all"
 
