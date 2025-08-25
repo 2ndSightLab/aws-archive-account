@@ -125,23 +125,30 @@ create_local_ami() {
 
      read -p "Do you want to test the image? (y):" test
      if [ "$test" == "y" ]; then
-        echo "Wait for the image to become available"
-        aws ec2 wait image-available --image-ids $NEW_AMI \
-           --profile $archive_to --region "$region" 
-    
+
+        NEW_AMI=$(wait_for_ami $NEW_AMI)
+
+        if [[ "$NEW_AMI" != ami-* ]]; then
+          echo "Error checking status of ami: $NEW_AMI"
+          exit 1
+        else
+          echo "Status available for ami: $NEW_AMI" 
+        fi
+ 
         new_ami_instance_id=$(launch_instance "$NEW_AMI" "$key_pair_name" "$security_group_id" "$subnet_id" "$kms_key" "$archive_to" "$region" "$instance_size")
 
         if [[ "$new_ami_instance_id" != i-* ]]; then
-          echo "Error launching instance: $new_ami_instance_id"
+          echo "Error launching test instance: $new_ami_instance_id"
           exit 1
         else
           echo "Launched instance: $new_ami_instance_id"
         fi
 
+        echo "Checking status of test instance: $new_ami_instance_id"
         new_ami_instance_id=$(check_status "$new_ami_instance_id" "$archive_to" "$region")
 
         if [[ "$new_ami_instance_id" != i-* ]]; then
-          echo "Error launching instance: $new_ami_instance_id"
+          echo "Error checking status of instance: $new_ami_instance_id"
           exit 1
         else
           echo "Status OK for  instance: $new_ami_instance_id" 
@@ -169,6 +176,51 @@ create_local_ami() {
    fi
 }
 
+wait_for_ami(){
+  AMI_ID="$1"  
+
+  local MAX_ATTEMPTS=240
+  local DELAY=15 
+  local AMI_STATE=""
+
+  echo "Waiting for AMI $AMI_ID to become available."
+
+  ATTEMPT=0
+  while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+
+    AMI_STATE=$(aws ec2 describe-images \
+    --image-ids "$AMI_ID" \
+    --query 'Images[0].State' \
+    --output text \
+    --profile $archive_to \
+    --region $region)
+
+    if [ $? -eq 0 ] && [ "$AMI_STATE" == "available" ]; then
+      echo $AMI_ID
+      return 0
+    fi
+
+    if [ "$AMI_STATE" == "failed" ]; then
+      echo "Error: AMI $AMI_ID id in failed state. Exit."
+      exit 1
+    fi
+
+    sleep $DELAY
+
+    ATTEMPT=$((ATTEMPT+1))
+
+  done
+
+  echo "Error: Max attempts exceeded for AMI $AMI_ID. Timed out."
+  wait_more="y"
+  while [ "wait_more" != "n" ]; do
+    read -p "Do you want to continue waiting? (y/n)" wait_more
+    if [ "$wait_more" == "y" ]; then
+      wait_for_ami $AMI_ID
+      wait_for_ami="n"
+    fi
+  done
+}
 check_status(){
     local instance_id="$1"
     local archive_to="$2"
