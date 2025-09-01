@@ -4,6 +4,12 @@ cat <<'END_TEXT'
 ***************************
 DNS
 ***************************
+END_TEXT
+
+read -p "Do you want to copy any DNS (Route 53) records? " copy
+if [ "$copy" == "y" ]; then 
+
+cat <<'END_TEXT'
 
 This is a manual step because DNS records can be
 configured in different ways for different purposes
@@ -36,3 +42,5 @@ aws route53 list-hosted-zones --query "HostedZones[*].[Id, Name]" --output text 
 echo ""
 read -p "Enter to continue. Ctrl-C to exit." ok
 
+fi #end if copy
+copy=""

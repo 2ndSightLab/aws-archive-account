@@ -2,8 +2,15 @@
 cat <<'END_TEXT'
 
 ***************************
-Elastic IP Addresses
+Elastic IP Addresses (EIPs)
 ***************************
+END_TEXT
+
+read -p "Do you want to copy any EIPs? " copy
+
+if [ "$copy" == "y" ]; then 
+
+cat <<'END_TEXT'
 
 You might want a record of the EIPs that may exist in
 logs or have been used in firewall rules, DNS records,
@@ -17,3 +24,5 @@ aws ec2 describe-addresses --profile $archive_from --region $region \
 
 read -p "If you want a record of the EIPs copy to a secret or parameter. Enter to continue. Ctrl-C to exit)" ok
 
+fi #end if copy
+copy=""

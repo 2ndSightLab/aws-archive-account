@@ -1,57 +1,5 @@
 #!/bin/bash -e
 
-cat <<'END_TEXT'
-
-***************************
-EC2 AMIs (Amamazon Machine Images)
-***************************
-
-END_TEXT
-
-
-read -p "Do you want to see a list of images in the from account? (y): " view
-if [ "$view" == "y" ]; then
-
-cat <<'END_TEXT'
-Below is a list of Amazon Machine Images in this account which can be used to 
-start new EC2 instances. Note that if the AMI is encrypted, the user trying
-to start a new image from the AMI will need permission to use the associated
-KMS key.
-
-END_TEXT
-
-  aws ec2 describe-images \
-  --owners self \
-  --profile $archive_from \
-  --region $region \
-  --query 'Images[*].{Name: Name, ImageId: ImageId, Snapshots: BlockDeviceMappings[?Ebs.Encrypted==`true`].Ebs.SnapshotId}' \
-  --output json \
- | jq -r '.[] | "\(.Name),\(.ImageId),\(.Snapshots[] // "N/A")" ' \
- | while IFS=, read -r ami_name ami_id snapshot_id; do
-    if [[ "${snapshot_id}" == "N/A" ]]; then
-        echo "AMI Name: ${ami_name}, AMI ID: ${ami_id}, KMS Key ID: No encryption/KMS key used"
-    else
-        kms_key_id=$(aws ec2 describe-snapshots \
-          --snapshot-ids "${snapshot_id}" \
-          --profile $archive_from \
-          --region $region \
-          --query "Snapshots[*].KmsKeyId" \
-          --output text 2>/dev/null)
-        if [[ -z "${kms_key_id}" ]]; then
-            kms_key_id="Default/AWS managed key"
-        fi
-        echo "AMI Name: ${ami_name}, AMI ID: ${ami_id}, KMS Key ID: ${kms_key_id}"
-    fi
-  done
-
-  echo ""
-fi
-
-echo "Done displaying image names. Copy specified AMI ids:"
-
-#mixed case because got some commands from gemini and it uses upper case
-#no time to fix it all
-
 create_local_ami() {
   local ami_id="$1"
   local key_pair_name="$2"
@@ -113,6 +61,7 @@ create_local_ami() {
      read -p "Enter new image name: " iname
      read -p "Enter description: " idesc
 
+     echo "Waiting for instance to stop"
      aws ec2 wait instance-stopped --instance-ids $instance_id --profile $archive_to --region $region
 
      NEW_AMI=$(aws ec2 create-image \
@@ -126,9 +75,26 @@ create_local_ami() {
 
      echo "Image created: $NEW_AMI"
 
-     read -p "Do you want to test the image? (y):" test
+cat <<'END_TEXT'
+
+        I tried to add some code here to wait for the ami
+        to become available and then test it, 
+        however it takes so long for the AMI to become 
+        available that the script always times out or 
+        is difficult to test. To simplify things I 
+        created a separate script for testing AMIs. 
+        Wait until the AMI status changes to  
+        Available and then run the script src/test-ami.sh.
+        Maybe I'll play around with this more later or 
+        AWS will make AMI creation faster.
+
+END_TEXT
+
+     test='n'
+     #read -p "Do you want to test the image? (y):" test
      if [ "$test" == "y" ]; then
 
+        echo "Waiting for AMI to become available..."
         NEW_AMI=$(wait_for_ami $NEW_AMI)
 
         if [[ "$NEW_AMI" != ami-* ]]; then
@@ -307,7 +273,61 @@ share_ami(){
   aws ec2 modify-image-attribute --image-id $AMI_ID --launch-permission "Add=[{UserId=$to_account}]" \
            --profile $archive_from --region $region
   echo "Shared the AMI."
+  echo "Status is pending...."
 }
+
+
+cat <<'END_TEXT'
+
+***************************
+EC2 AMIs (Amazon Machine Images)
+***************************
+
+END_TEXT
+
+
+read -p "Do you want to copy any AMIs? (y): " copy
+if [ "$copy" == "y" ]; then
+
+read -p "Do you want to see a list of images in the from account? (y): " view
+if [ "$view" == "y" ]; then
+
+cat <<'END_TEXT'
+Below is a list of Amazon Machine Images in this account which can be used to 
+start new EC2 instances. Note that if the AMI is encrypted, the user trying
+to start a new image from the AMI will need permission to use the associated
+KMS key.
+
+END_TEXT
+
+  aws ec2 describe-images \
+  --owners self \
+  --profile $archive_from \
+  --region $region \
+  --query 'Images[*].{Name: Name, ImageId: ImageId, Snapshots: BlockDeviceMappings[?Ebs.Encrypted==`true`].Ebs.SnapshotId}' \
+  --output json \
+ | jq -r '.[] | "\(.Name),\(.ImageId),\(.Snapshots[] // "N/A")" ' \
+ | while IFS=, read -r ami_name ami_id snapshot_id; do
+    if [[ "${snapshot_id}" == "N/A" ]]; then
+        echo "AMI Name: ${ami_name}, AMI ID: ${ami_id}, KMS Key ID: No encryption/KMS key used"
+    else
+        kms_key_id=$(aws ec2 describe-snapshots \
+          --snapshot-ids "${snapshot_id}" \
+          --profile $archive_from \
+          --region $region \
+          --query "Snapshots[*].KmsKeyId" \
+          --output text 2>/dev/null)
+        if [[ -z "${kms_key_id}" ]]; then
+            kms_key_id="Default/AWS managed key"
+        fi
+        echo "AMI Name: ${ami_name}, AMI ID: ${ami_id}, KMS Key ID: ${kms_key_id}"
+    fi
+  done
+
+  echo ""
+fi
+
+echo "Done displaying image names."
 
 AMI_ID="all"
 
@@ -353,12 +373,35 @@ while [[ -n "$AMI_ID" ]]; do
 
    if [[ -n $AMI_ID ]]; then
      if [ "$AMI_ID" == "all" ]; then
-       echo "TODO: Archiving all AMIs not implemented."
+
+       #loop through all AMIs and share them
+       aws ec2 describe-images --region "$region" --owners 'self' \
+          --profile $archive_from
+          --query 'Images[].ImageId' --output json | jq -r '.[]' | while read ami_id; do
+          share_ami "$AMI_ID" "$to_account" "$archive_from" "$region"
+       done
+   
+       #create local ami
+       aws ec2 describe-images --region "$region" --owners 'self' \
+          --profile $archive_from 
+          --query 'Images[].ImageId' --output json | jq -r '.[]' | while read ami_id; do
+       create_local_ami "$AMI_ID" "$KEY_PAIR" "$SG_ID" "$SUBNET_ID" "$KMS_KEY" "$archive_to" "$region"
+     done
+
      else
     
        share_ami "$AMI_ID" "$to_account" "$archive_from" "$region"
        create_local_ami "$AMI_ID" "$KEY_PAIR" "$SG_ID" "$SUBNET_ID" "$KMS_KEY" "$archive_to" "$region"
-
      fi
    fi
 done      
+
+echo "Remember to test the AMIs! You can do that with the script src/test-ami.sh"
+echo "After you verify the AMIs are good to go you can remove them deregister them in the from account."
+echo ""
+read -p "Enter to continue." ok
+
+
+#end if copy....
+fi
+
