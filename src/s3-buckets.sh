@@ -5,14 +5,9 @@ cat <<'END_TEXT'
 ***************************
 S3 Buckets 
 ***************************
-
-Below is a list of S3 Buckets. You can copy all the buckets or individual
-buckets based on the bucket name. You will need permission to use the KMS key 
-if one exists to decrypt the contents of the bucket.
-
 END_TEXT
 
-read -p "Would you like to see the required policies to apply to IAM roles and bucket? (y): " v
+read -p "Would you like to see the required IAM, KMS and S3 policies to transfer an encrypted bucket? (y): " v
 
 if [ "$v" == "y" ]; then
 
@@ -91,8 +86,15 @@ END_TEXT
 fi
 
 read -p "Do you want to see the list of S3 buckets? (y): " view
-
 if [ "$view" == "y" ]; then
+
+cat <<'END_TEXT'
+
+Below is a list of S3 Buckets. You can copy all the buckets or individual
+buckets based on the bucket name. You will need permission to use the KMS key 
+if one exists to decrypt the contents of the bucket.
+
+END_TEXT
 
   for bucket_name in $(aws s3api list-buckets --query "Buckets[].Name" --output text --profile $archive_from --region $region); do 
     echo "Bucket: ${bucket_name}" 

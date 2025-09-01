@@ -31,12 +31,21 @@ echo "You can use these scripts to configure your profiles:"
 echo "https://github.com/2ndSightLab/aws-cli-profile"
 echo ""
 read -p "Enter the profile for the from account: " archive_from
+echo "Validate credentials for $archive_from:"
+aws sts get-caller-identity --profile $archive_from
+echo ""
 read -p "Enter the profile from the to account: " archive_to
+echo "Validate credentials for $archive_to:"
+aws sts get-caller-identity --profile $archive_to
+echo ""
+read -p "Enter the profile used to list the KMS keys used to encrypt new resources: " kms_profile
+echo "Validate credentials for $kms_profile:"
+aws sts get-caller-identity --profile $kms_profile 
+echo ""
 read -p "Enter region: " region
 
 source src/eips.sh
 source src/dns.sh
-source src/ec2-keys.sh
 source src/s3-buckets.sh
 source src/amis.sh
 source src/secrets.sh

@@ -1,6 +1,13 @@
 #!/bin/bash -e
+cat <<'END_TEXT'
 
-echo "Here are a list of the EC2 SSH keys:
+***************************
+SSH KEY Pairs
+***************************
+
+END_TEXT
+
+echo "Here are a list of the EC2 SSH keys:"
 echo ""
 aws ec2 describe-key-pairs --profile $archive_from region $region
 echo ""

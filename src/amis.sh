@@ -6,15 +6,19 @@ cat <<'END_TEXT'
 EC2 AMIs (Amamazon Machine Images)
 ***************************
 
+END_TEXT
+
+
+read -p "Do you want to see a list of images in the from account? (y): " view
+if [ "$view" == "y" ]; then
+
+cat <<'END_TEXT'
 Below is a list of Amazon Machine Images in this account which can be used to 
 start new EC2 instances. Note that if the AMI is encrypted, the user trying
 to start a new image from the AMI will need permission to use the associated
 KMS key.
 
 END_TEXT
-
-read -p "Do you want to see a list of images in the from account? (y): " view
-if [ "$view" == "y" ]; then
 
   aws ec2 describe-images \
   --owners self \
@@ -47,7 +51,6 @@ echo "Done displaying image names. Copy specified AMI ids:"
 
 #mixed case because got some commands from gemini and it uses upper case
 #no time to fix it all
-
 
 create_local_ami() {
   local ami_id="$1"
@@ -221,6 +224,7 @@ wait_for_ami(){
     fi
   done
 }
+
 check_status(){
     local instance_id="$1"
     local archive_to="$2"
@@ -311,13 +315,39 @@ while [[ -n "$AMI_ID" ]]; do
 
    read -p "Enter the AMI ID (not name) you want to archive or all. Enter to continue: " AMI_ID
 
-   echo "Enter the values for the EC2 instances uses to create and test the AMI"
+   echo "Enter the values for the EC2 instance used to transfer the AMI ownership to the new account:"
 
    echo ""
-   read -p "Enter the name of your SSH key pair: " KEY_PAIR
+   echo "EC2 SSH keys in the to account:"
+   echo ""
+   aws ec2 describe-key-pairs  --query 'KeyPairs[*].KeyName' \
+     --profile $archive_to --region $region --output text
+   echo ""
+   read -p "Enter the name of your SSH key pair or list to see a list of key pairs: " KEY_PAIR
+   echo ""
+   echo "Security groups in the to account:"
+   echo ""
+   aws ec2 describe-security-groups --query "SecurityGroups[*].[GroupId,GroupName]" --output text \
+      --region $region --profile $archive_to
+   echo ""
    read -p "Enter the Security Group ID (e.g., sg-xxxxxxxxxxxxxxxxx): " SG_ID
+   echo ""
+   echo "Subnets in the to account:"
+   aws ec2 describe-subnets --profile $archive_to --region $region \
+      --query "Subnets[*].{ID:SubnetId,Name:Tags[?Key=='Name']|[0].Value}" --output text
+   echo ""
    read -p "Enter the Subnet ID (e.g., subnet-xxxxxxxxxxxxxxxxx): " SUBNET_ID
-   read -p "Enter the KMS Key ARN for EBS encryption: " KMS_KEY
+   echo ""
+   echo "Key ARNs and Aliases (one command for all this data: #awswishlist):"
+   echo ""
+
+   aws kms list-aliases --profile $kms_profile --region $region \
+    | jq -r --arg region "$region" \
+    --arg accountid "$(aws sts get-caller-identity --profile $kms_profile --query Account --output text)" \
+    '.Aliases[] | select(.TargetKeyId) | "arn:aws:kms:" + $region + ":" + $accountid + ":key/" + .TargetKeyId + " " + .AliasName'
+
+   echo ""  
+   read -p "Enter the KMS Key ARN for EBS encryption in the destination account: " KMS_KEY
 
    to_account=$(aws sts get-caller-identity --query Account --output text --profile $archive_to)
 
