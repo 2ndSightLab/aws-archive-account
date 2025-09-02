@@ -9,14 +9,38 @@ clear
 echo ""
 echo "About this script"
 echo "***************************"
+echo ""
+echo "Blog posts:"
+echo ""
+echo "https://medium.com/cloud-security/archiving-an-aws-account-e3b47bf1bdd3"
+echo ""
 echo "This script presumes you are running it with:"
 echo "* A user in the archive account (to_account) that has:"
 echo "* Permission to assume an archive role in the to_account"
 echo "* Permission to assume an archive role in the from_account"
 echo "* The roles in both accounts have required permissions."
-echo "(Permissions are descibed in detail for each step.)"
 echo ""
 read -p "Have you created the user, roles and policies? Ctrl-C to exit. Enter to continue." ok
+echo ""
+echo "You can do the following with this script:"
+echo ""
+echo "1 Archive: archive or copy resources from one AWS account to another"
+echo "2 Launch an instance from an AMI to test it with a given profile before you deregister the source AMI"
+echo "3 Apply a lifecycle rule to a bucket"
+echo ""
+read -p "Enter the number for the action you want to run: " action
+echo ""
+[[ " $list " =~ " $value " ]] && echo "Action: $action" || (echo "Action $action is invalid"; exit 1)
+if [ "$action" == "2" ]; then
+source src/test-ami.sh
+exit 0
+fi 
+
+if [ "$action" == "3" ]; then 
+source src/s3-lifecycle.sh
+exit 0
+fi
+
 echo ""
 echo "Configure to_account and from_account CLI profiles"
 echo "***************************"
