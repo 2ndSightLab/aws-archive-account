@@ -13,7 +13,7 @@ https://medium.com/@2ndsightlab/a-script-to-apply-a-lifecycle-rule-to-an-s3-buck
 END_TEXT
 
 aws configure list-profiles
-
+echo ""
 read -p "Enter the CLI profile to use to apply the lifecycle policy: " profile
 read -p "Enter the region in which the bucket exists where you want to apply the rule: " region
 
@@ -63,9 +63,18 @@ cat <<'END_TEXT'
 **************NOTE******************
 At the time of this writing there seems to be a bug in the AWS pricing API. No matter how I query the price for the DEEP_ARCHIVE option will not come up. I wrote a blog post about this and Q is telling me there is a separate storage class which should apparently be showing up here. If you run this at a later date perhaps it will be fixed by then.
 
-If you are looking for the cheapest option, you can create a lifecycle policy for one day and choose DEEP_ARCHIVE to transition in one day.
+If you are looking for the cheapest storage class (price per GB stored), you can create a lifecycle policy for one day and choose DEEP_ARCHIVE to transition in one day for data you will not be accessing again. 
 
-However, if you need to retrieve the data, you will pay other fees. You will apparently also pay a one time fee if you choose the intelligent tiering option and your data will not tranistion for 180 days. So it is cheaper to move straight to DEEP_ARCHIVE if you never plan to look at the data again (except in case of emergency which hopefully never happens.)
+CAVEATS:
+
+* There is a one time fee to transfer items to a new storage class.
+* By default the lowest size transfered is 128KB. If you have items smaller you can override that but the cost may not be worth it.
+* If you need to retrieve the data, you will pay other fees that may make the cost not worth the transfer depending on your access patterns.
+* If you choose intelligent tiering your data might not transition to a lower cost tier for 180 days. So it is cheaper to move straight to DEEP_ARCHIVE if you never plan to look at the data again (except in case of emergency which hopefully never happens.)
+* If you transfer the data to DEEP_ARCHIVE you have to leave it there for at least 180 days (meaning you can't save money by deleting it).
+* READ THE PRICING PAGE IN CASE ANY OF THIS HAS CHANGED.
+
+
 ***********************************
 
 END_TEXT
