@@ -1,4 +1,6 @@
-When I perform a penetration test I create a new AWS account standalone with it's own resources for the test.
+When I perform a penetration test I create a new AWS account standalone with spearate resources just for that test. 
+That way, if something goes wrong, the impact is limited to the resources in that account, presuming I am using IAM 
+users, roles and permissions specific to that one test.
 
 After the test I want to archive those resources, so I wrote this script to do that.
 
