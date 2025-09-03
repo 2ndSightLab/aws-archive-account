@@ -33,12 +33,12 @@ END_TEXT
 echo "Domain names:"
 echo ""
 aws route53domains list-domains --region us-east-1 --output text --query "Domains[*].DomainName" \
-  --profile $archive_from --region $region
+  --profile $archive_from --region us-east-1
 echo ""
 echo "Hosted Zones:"
 echo ""
 aws route53 list-hosted-zones --query "HostedZones[*].[Id, Name]" --output text \
-  --profile $archive_from --region $region
+  --profile $archive_from --region us-east-1
 echo ""
 read -p "Enter to continue. Ctrl-C to exit." ok
 

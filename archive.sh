@@ -68,12 +68,16 @@ aws sts get-caller-identity --profile $kms_profile
 echo ""
 read -p "Enter region: " region
 
-source src/eips.sh
-source src/dns.sh
 source src/s3-buckets.sh
 source src/amis.sh
 source src/secrets.sh
 source src/parameters.sh
+
+echo "*************************"
+echo "Resources to manually review"
+echo "*************************"
+source src/eips.sh
+source src/dns.sh
 source src/iam-users.sh
 source src/iam-roles.sh
 source src/iam-policies.sh
